@@ -2,6 +2,8 @@
 
 ## Installation
 
+- Prereq: install aws cli and configure it with the provided credentials
+
 ```bash
 # Clone the repository
 git clone https://github.com/var-un-m/download-video-data.git
