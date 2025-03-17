@@ -3,6 +3,7 @@ import csv
 import os
 import logging
 import argparse
+import math
 from concurrent.futures import ThreadPoolExecutor
 from botocore.exceptions import ClientError
 
@@ -58,18 +59,26 @@ def parse_s3_path(s3_path):
     
     return bucket, key
 
+def get_subfolder_number(file_count):
+    """Determine the subfolder number based on file count."""
+    return str(math.floor(file_count / 1000)).zfill(7)
+
 def download_from_s3(s3_path, local_path, s3_client, logger):
     """Download a file from S3 to local storage and return the absolute path."""
     try:
         bucket, key = parse_s3_path(s3_path)
         logger.info(f"Downloading {s3_path} to {local_path}")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
         s3_client.download_file(bucket, key, local_path)
         return os.path.abspath(local_path)
     except ClientError as e:
         logger.error(f"Error downloading {s3_path}: {e}")
         return None
 
-def download_files(entry, download_base_dir, s3_client, workers, logger):
+def download_files(entry, download_base_dir, subfolder, s3_client, workers, logger):
     """Download video, audio, and landmarks files for an entry."""
     video_id = entry['video_id']
     quality_score = float(entry.get('quality_score', 0.0))
@@ -78,9 +87,10 @@ def download_files(entry, download_base_dir, s3_client, workers, logger):
     audio_path = entry['audio_path']
     landmarks_path = entry['landmarks_raw_path']
     
-    rel_video_path = os.path.join(download_base_dir, 'video', os.path.basename(video_path))
-    rel_audio_path = os.path.join(download_base_dir, 'audio', os.path.basename(audio_path))
-    rel_landmark_path = os.path.join(download_base_dir, 'landmarks', os.path.basename(landmarks_path))
+    # Use the same subfolder for all related files
+    rel_video_path = os.path.join(download_base_dir, 'video', subfolder, os.path.basename(video_path))
+    rel_audio_path = os.path.join(download_base_dir, 'audio', subfolder, os.path.basename(audio_path))
+    rel_landmark_path = os.path.join(download_base_dir, 'landmarks', subfolder, os.path.basename(landmarks_path))
     
     local_video_path = os.path.abspath(rel_video_path)
     local_audio_path = os.path.abspath(rel_audio_path)
@@ -89,6 +99,7 @@ def download_files(entry, download_base_dir, s3_client, workers, logger):
     results = {}
     results['video_id'] = video_id
     results['quality_score'] = quality_score
+    results['subfolder'] = subfolder
     
     with ThreadPoolExecutor(max_workers=workers) as executor:
         video_future = executor.submit(download_from_s3, video_path, local_video_path, s3_client, logger)
@@ -134,12 +145,25 @@ def process_dynamo_entries(table_name, download_base_dir, region, workers, quali
     
     logger.info(f"Filtered to {len(filtered_entries)} entries with 'MP' in landmarks path and quality score >= {quality_threshold}")
     
-    for entry in filtered_entries:
-        result = download_files(entry, download_base_dir, s3, workers, logger)
+    # Process entries with organized folder structure
+    for i, entry in enumerate(filtered_entries):
+        # Calculate which subfolder this file should go in
+        subfolder = get_subfolder_number(i)
+        result = download_files(entry, download_base_dir, subfolder, s3, workers, logger)
         if all(result.values()):  
             results.append(result)
     
     return results
+
+def create_folder_structure(download_base_dir, logger):
+    """Create the base folder structure for downloads."""
+    # Create base directories for each type
+    base_dirs = ['video', 'audio', 'landmarks']
+    
+    for base_dir in base_dirs:
+        dir_path = os.path.join(download_base_dir, base_dir)
+        os.makedirs(dir_path, exist_ok=True)
+        logger.info(f"Created directory: {dir_path}")
 
 def write_to_csv(results, output_file, logger):
     """Write results to CSV file."""
@@ -147,7 +171,7 @@ def write_to_csv(results, output_file, logger):
         logger.warning("No results to write to CSV")
         return
     
-    fieldnames = ['video_id', 'local_video_path', 'local_audio_path', 'local_landmark_path', 'quality_score']
+    fieldnames = ['video_id', 'subfolder', 'local_video_path', 'local_audio_path', 'local_landmark_path', 'quality_score']
     
     os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
     
@@ -168,10 +192,9 @@ def main():
     logger.info(f"Starting DynamoDB processing with table '{args.table}'")
     logger.info(f"Quality threshold set to {args.quality_threshold}")
     
+    # Create the initial folder structure
     download_base_dir = args.download_dir
-    os.makedirs(os.path.join(download_base_dir, 'video'), exist_ok=True)
-    os.makedirs(os.path.join(download_base_dir, 'audio'), exist_ok=True)
-    os.makedirs(os.path.join(download_base_dir, 'landmarks'), exist_ok=True)
+    create_folder_structure(download_base_dir, logger)
     
     results = process_dynamo_entries(args.table, download_base_dir, args.region, 
                                     args.workers, args.quality_threshold, logger)
