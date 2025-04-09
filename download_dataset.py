@@ -4,6 +4,7 @@ import os
 import logging
 import argparse
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor
 from botocore.exceptions import ClientError
 
@@ -59,6 +60,20 @@ def parse_s3_path(s3_path):
     
     return bucket, key
 
+def calculate_num_frames(video_id):
+    """Extract frame information from video_id and calculate num_frames."""
+    try:
+        # Extract the frame range from the video_id
+        match = re.search(r'\{(\d+)_(\d+)\}$', video_id)
+        if match:
+            start_frame = int(match.group(1))
+            end_frame = int(match.group(2))
+            num_frames = end_frame - start_frame
+            return num_frames
+        return None
+    except Exception:
+        return None
+
 def get_subfolder_number(file_count):
     """Determine the subfolder number based on file count."""
     return str(math.floor(file_count / 1000)).zfill(7)
@@ -82,10 +97,14 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     """Download video, audio, and landmarks files for an entry."""
     video_id = entry['video_id']
     quality_score = float(entry.get('quality_score', 0.0))
+    actor_id = entry.get('actor_id', '')
     
     video_path = entry['video_path']
     audio_path = entry['audio_path']
     landmarks_path = entry['landmarks_raw_path']
+    
+    # Calculate num_frames from video_id
+    num_frames = calculate_num_frames(video_id)
     
     # Use the same subfolder for all related files
     rel_video_path = os.path.join(download_base_dir, 'video', subfolder, os.path.basename(video_path))
@@ -98,8 +117,10 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     
     results = {}
     results['video_id'] = video_id
+    results['actor_id'] = actor_id
     results['quality_score'] = quality_score
     results['subfolder'] = subfolder
+    results['num_frames'] = num_frames
     
     with ThreadPoolExecutor(max_workers=workers) as executor:
         video_future = executor.submit(download_from_s3, video_path, local_video_path, s3_client, logger)
@@ -171,7 +192,8 @@ def write_to_csv(results, output_file, logger):
         logger.warning("No results to write to CSV")
         return
     
-    fieldnames = ['video_id', 'subfolder', 'local_video_path', 'local_audio_path', 'local_landmark_path', 'quality_score']
+    fieldnames = ['video_id', 'actor_id', 'subfolder', 'local_video_path', 'local_audio_path', 
+                 'local_landmark_path', 'quality_score', 'num_frames']
     
     os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
     
