@@ -67,7 +67,7 @@ def calculate_num_frames(video_id):
     """Extract frame information from video_id and calculate num_frames."""
     try:
         # Extract the frame range from the video_id
-        match = re.search(r'\{(\d+)_(\d+)\}$', video_id)
+        match = re.search(r'(\d+)_(\d+)$', video_id)
         if match:
             start_frame = int(match.group(1))
             end_frame = int(match.group(2))
