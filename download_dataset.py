@@ -96,7 +96,7 @@ def download_from_s3(s3_path, local_path, s3_client, logger):
         logger.error(f"Error downloading {s3_path}: {e}")
         return None
 
-def download_files(entry, download_base_dir, subfolder, s3_client, workers, logger):
+def download_files(entry, download_base_dir, subfolder, s3_client, workers, logger, full_mode):
     """Download video, audio, and landmarks files for an entry."""
     video_id = entry['video_id']
     quality_score = float(entry.get('quality_score', 0.0))
@@ -104,7 +104,8 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     
     video_path = entry['video_path']
     audio_path = entry['audio_path']
-    landmarks_path = entry['landmarks_raw_path']
+    if not full_mode:
+        landmarks_path = entry['landmarks_raw_path']
     
     # Calculate num_frames from video_id
     num_frames = calculate_num_frames(video_id)
@@ -112,11 +113,13 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     # Use the same subfolder for all related files
     rel_video_path = os.path.join(download_base_dir, 'video', subfolder, os.path.basename(video_path))
     rel_audio_path = os.path.join(download_base_dir, 'audio', subfolder, os.path.basename(audio_path))
-    rel_landmark_path = os.path.join(download_base_dir, 'landmarks', subfolder, os.path.basename(landmarks_path))
+    if not full_mode:
+        rel_landmark_path = os.path.join(download_base_dir, 'landmarks', subfolder, os.path.basename(landmarks_path))
     
     local_video_path = os.path.abspath(rel_video_path)
     local_audio_path = os.path.abspath(rel_audio_path)
-    local_landmark_path = os.path.abspath(rel_landmark_path)
+    if not full_mode:
+        local_landmark_path = os.path.abspath(rel_landmark_path)
     
     results = {}
     results['video_id'] = video_id
@@ -128,11 +131,13 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     with ThreadPoolExecutor(max_workers=workers) as executor:
         video_future = executor.submit(download_from_s3, video_path, local_video_path, s3_client, logger)
         audio_future = executor.submit(download_from_s3, audio_path, local_audio_path, s3_client, logger)
-        landmark_future = executor.submit(download_from_s3, landmarks_path, local_landmark_path, s3_client, logger)
+        if not full_mode:
+            landmark_future = executor.submit(download_from_s3, landmarks_path, local_landmark_path, s3_client, logger)
         
         results['local_video_path'] = video_future.result()
         results['local_audio_path'] = audio_future.result()
-        results['local_landmark_path'] = landmark_future.result()
+        if not full_mode:
+            results['local_landmark_path'] = landmark_future.result()
     
     return results
 
@@ -183,7 +188,7 @@ def process_dynamo_entries(table_name, download_base_dir, region, workers, quali
     for i, entry in enumerate(filtered_entries):
         # Calculate which subfolder this file should go in
         subfolder = get_subfolder_number(i)
-        result = download_files(entry, download_base_dir, subfolder, s3, workers, logger)
+        result = download_files(entry, download_base_dir, subfolder, s3, workers, logger, full_mode)
         if all(result.values()):  
             results.append(result)
     
