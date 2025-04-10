@@ -33,6 +33,9 @@ def parse_arguments():
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default='INFO', help='Logging level (default: INFO)')
     
+    parser.add_argument('--full', action='store_true',
+                        help='Process all entries regardless of landmarks path content')
+    
     return parser.parse_args()
 
 def setup_logging(log_level):
@@ -133,7 +136,7 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     
     return results
 
-def process_dynamo_entries(table_name, download_base_dir, region, workers, quality_threshold, logger):
+def process_dynamo_entries(table_name, download_base_dir, region, workers, quality_threshold, full_mode, logger):
     """Process entries from DynamoDB table."""
     dynamodb = boto3.resource('dynamodb', region_name=region)
     s3 = boto3.client('s3', region_name=region)
@@ -160,11 +163,21 @@ def process_dynamo_entries(table_name, download_base_dir, region, workers, quali
         landmarks_path = item.get('landmarks_raw_path', '')
         quality_score = float(item.get('quality_score', 0.0))
         
-        if ('MP' in landmarks_path and
-            quality_score >= quality_threshold):
-            filtered_entries.append(item)
+        # If full_mode is True, only apply quality threshold filter
+        if full_mode:
+            if quality_score >= quality_threshold:
+                filtered_entries.append(item)
+        else:
+            # Apply both filters when full_mode is False
+            if ('MP' in landmarks_path and
+                quality_score >= quality_threshold):
+                filtered_entries.append(item)
     
-    logger.info(f"Filtered to {len(filtered_entries)} entries with 'MP' in landmarks path and quality score >= {quality_threshold}")
+    # Log appropriate message based on full_mode
+    if full_mode:
+        logger.info(f"Filtered to {len(filtered_entries)} entries with quality score >= {quality_threshold}")
+    else:
+        logger.info(f"Filtered to {len(filtered_entries)} entries with 'MP' in landmarks path and quality score >= {quality_threshold}")
     
     # Process entries with organized folder structure
     for i, entry in enumerate(filtered_entries):
@@ -213,13 +226,14 @@ def main():
     
     logger.info(f"Starting DynamoDB processing with table '{args.table}'")
     logger.info(f"Quality threshold set to {args.quality_threshold}")
+    logger.info(f"Full mode: {args.full}")
     
     # Create the initial folder structure
     download_base_dir = args.download_dir
     create_folder_structure(download_base_dir, logger)
     
     results = process_dynamo_entries(args.table, download_base_dir, args.region, 
-                                    args.workers, args.quality_threshold, logger)
+                                    args.workers, args.quality_threshold, args.full, logger)
     
     write_to_csv(results, args.output_csv, logger)
     
