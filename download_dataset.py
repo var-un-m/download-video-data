@@ -109,7 +109,7 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     
     # Calculate num_frames from video_id
     num_frames = calculate_num_frames(video_id)
-    
+
     # Use the same subfolder for all related files
     rel_video_path = os.path.join(download_base_dir, 'video', subfolder, os.path.basename(video_path))
     rel_audio_path = os.path.join(download_base_dir, 'audio', subfolder, os.path.basename(audio_path))
@@ -124,7 +124,8 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     results = {}
     results['video_id'] = video_id
     results['actor_id'] = actor_id
-    results['quality_score'] = quality_score
+    if not full_mode:
+        results['quality_score'] = quality_score
     results['subfolder'] = subfolder
     results['num_frames'] = num_frames
     
@@ -189,8 +190,7 @@ def process_dynamo_entries(table_name, download_base_dir, region, workers, quali
         # Calculate which subfolder this file should go in
         subfolder = get_subfolder_number(i)
         result = download_files(entry, download_base_dir, subfolder, s3, workers, logger, full_mode)
-        if all(result.values()):  
-            results.append(result)
+        results.append(result)
     
     return results
 
