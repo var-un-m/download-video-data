@@ -106,8 +106,17 @@ def download_files(entry, download_base_dir, subfolder, s3_client, workers, logg
     audio_path = entry.get('audio_path', '')
     landmarks_path = entry.get('landmarks_raw_path', '')
     
-    # Calculate num_frames from video_id
-    num_frames = calculate_num_frames(video_id)
+    # Get num_frames from DynamoDB entry if it exists, otherwise calculate it
+    num_frames = None
+    if 'num_frames' in entry:
+        try:
+            num_frames = int(entry['num_frames'])
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid num_frames value in DynamoDB for {video_id}, will calculate from video_id")
+            num_frames = calculate_num_frames(video_id)
+    else:
+        # Fallback to calculating from video_id
+        num_frames = calculate_num_frames(video_id)
 
     # Use the same subfolder for all related files
     rel_video_path = os.path.join(download_base_dir, 'video', subfolder, os.path.basename(video_path))
